@@ -1,4 +1,6 @@
 apply plugin: 'com.android.application'
+apply plugin: 'android-apt'
+apply plugin: "me.tatarka.retrolambda"
 
 android {
     compileSdkVersion 23
@@ -12,7 +14,7 @@ android {
         versionName "1.0"
 
         jackOptions {
-            enabled true
+            enabled false
         }
     }
 
@@ -61,4 +63,12 @@ dependencies {
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:appcompat-v7:23.3.0'
     compile 'com.google.android.gms:play-services:8.4.0'
+    compile('com.google.android.gms:play-services-location:8.4.0')
+
+    // location tracking
+    compile('io.nlopez.smartlocation:library:3.2.2') { transitive = false }
+
+    // permissions
+    compile 'com.github.hotchemi:permissionsdispatcher:2.1.2'
+    apt 'com.github.hotchemi:permissionsdispatcher-processor:2.1.2'
 }

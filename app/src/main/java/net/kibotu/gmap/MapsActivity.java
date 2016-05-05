@@ -1,18 +1,46 @@
 package net.kibotu.gmap;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.location.Location;
+import android.support.annotation.CallSuper;
+import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
+import android.support.v7.app.AlertDialog;
+import android.util.Log;
+import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.maps.CameraUpdate;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.CameraPosition;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.nlopez.smartlocation.OnLocationUpdatedListener;
+import io.nlopez.smartlocation.SmartLocation;
+import permissions.dispatcher.NeedsPermission;
+import permissions.dispatcher.OnNeverAskAgain;
+import permissions.dispatcher.OnPermissionDenied;
+import permissions.dispatcher.OnShowRationale;
+import permissions.dispatcher.PermissionRequest;
+import permissions.dispatcher.RuntimePermissions;
+
+@RuntimePermissions
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
 
-    private GoogleMap mMap;
+    private static final int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
+    public final static AtomicBoolean isRunning = new AtomicBoolean(false);
+    private static final String TAG = MapsActivity.class.getSimpleName();
+    private GoogleMap map;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -22,25 +50,131 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+
+        if (checkPlayServices()) {
+            // register gcm service
+            Log.v(TAG, "play services available");
+        }
+    }
+
+    @Override
+    public void onMapReady(GoogleMap googleMap) {
+        map = googleMap;
+
+        map.setBuildingsEnabled(true);
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        map.setMyLocationEnabled(true);
+
+        LatLng defaultLocation = new LatLng(52.5219184, 13.4132147);
+        map.moveCamera(CameraUpdateFactory.newLatLngZoom(defaultLocation, 17f));
+
+        if (!isLocationServiceEnabled()) {
+            onNoLocationServiceAvailable();
+        }
+    }
+
+    void onLocationUpdated(Location location) {
+        Log.v(TAG, "onLocationUpdated " + location);
+
+        LatLng newLocation = new LatLng(location.getLatitude(), location.getLongitude());
+//        map.moveCamera(CameraUpdateFactory.newLatLng(newLocation));
+
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(new CameraPosition.Builder()
+                .target(newLocation)
+                // .target(map.getCameraPosition().target)
+                .zoom(map.getCameraPosition().zoom)
+                .bearing(location.getBearing())
+                .tilt(45)
+                .build()));
+    }
+
+    private void onNoLocationServiceAvailable() {
+        Log.v(TAG, "onNoLocationServiceAvailable");
+    }
+
+    @CallSuper
+    @Override
+    protected void onResume() {
+        isRunning.set(true);
+        super.onResume();
+
+        MapsActivityPermissionsDispatcher.showLocationWithCheck(this);
+    }
+
+    @CallSuper
+    @Override
+    protected void onPause() {
+        isRunning.set(false);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+    }
+
+    /**
+     * Check the device to make sure it has the Google Play Services APK. If
+     * it doesn't, display a dialog that allows users to download the APK from
+     * the Google Play Store or enable it in the device's system settings.
+     */
+
+    private boolean checkPlayServices() {
+        final GoogleApiAvailability apiAvailability = GoogleApiAvailability.getInstance();
+        int resultCode = apiAvailability.isGooglePlayServicesAvailable(this);
+        if (resultCode != ConnectionResult.SUCCESS) {
+            if (apiAvailability.isUserResolvableError(resultCode)) {
+                apiAvailability.getErrorDialog(this, resultCode, PLAY_SERVICES_RESOLUTION_REQUEST).show();
+            } else {
+                Log.i(TAG, "This device is not supported.");
+                finish();
+            }
+            return false;
+        }
+        return true;
     }
 
 
-    /**
-     * Manipulates the map once available.
-     * This callback is triggered when the map is ready to be used.
-     * This is where we can add markers or lines, add listeners or move the camera. In this case,
-     * we just add a marker near Sydney, Australia.
-     * If Google Play services is not installed on the device, the user will be prompted to install
-     * it inside the SupportMapFragment. This method will only be triggered once the user has
-     * installed Google Play services and returned to the app.
-     */
-    @Override
-    public void onMapReady(GoogleMap googleMap) {
-        mMap = googleMap;
+    public boolean isLocationServiceEnabled() {
+        return SmartLocation
+                .with(this)
+                .location()
+                .state()
+                .locationServicesEnabled();
+    }
 
-        // Add a marker in Sydney and move the camera
-        LatLng sydney = new LatLng(-34, 151);
-        mMap.addMarker(new MarkerOptions().position(sydney).title("Marker in Sydney"));
-        mMap.moveCamera(CameraUpdateFactory.newLatLng(sydney));
+
+    @NeedsPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+    void showLocation() {
+        SmartLocation.with(this).location().start(this::onLocationUpdated);
+    }
+
+    @OnShowRationale(Manifest.permission.ACCESS_FINE_LOCATION)
+    void showRationaleForLocation(PermissionRequest request) {
+        new AlertDialog.Builder(this)
+                .setMessage("gimmeh location permission >:D")
+                .setPositiveButton("Sure", (dialog, button) -> request.proceed())
+                .setNegativeButton("Nope", (dialog, button) -> request.cancel())
+                .show();
+    }
+
+    @OnPermissionDenied(Manifest.permission.ACCESS_FINE_LOCATION)
+    void showDeniedForLocation() {
+        Toast.makeText(this, "location permission denied", Toast.LENGTH_SHORT).show();
+    }
+
+    @OnNeverAskAgain(Manifest.permission.ACCESS_FINE_LOCATION)
+    void showNeverAskForLocation() {
+        Toast.makeText(this, "location permission never asked again", Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        // NOTE: delegate the permission handling to generated method
+        MapsActivityPermissionsDispatcher.onRequestPermissionsResult(this, requestCode, grantResults);
     }
 }
